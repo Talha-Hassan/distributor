@@ -7,21 +7,20 @@ import (
 	"testing"
 )
 
-func TestStoreDelete(t *testing.T) {
+func newStore() *Store {
 	opts := StoreOps{
 		PathTransformFunc: CASPathTransformFunc,
 	}
-	s := NewStore(opts)
-	key := "MoiSpecial"
-	data := []byte("i love her")
-
-	if err := s.WriteStream(key, bytes.NewReader(data)); err != nil {
+	return NewStore(opts)
+}
+func tearDown(t *testing.T, s *Store) {
+	if err := s.clear(); err != nil {
 		t.Error(err)
 	}
-	if err := s.delete(key); err != nil {
-		t.Error(err)
-	}
-
+}
+func TestStoreDelete(t *testing.T) {
+	s := newStore()
+	tearDown(t, s)
 }
 
 func TestWrite(t *testing.T) {
@@ -29,12 +28,12 @@ func TestWrite(t *testing.T) {
 		PathTransformFunc: CASPathTransformFunc,
 	}
 	s := NewStore(opts)
-
+	key := "Iamhappy"
 	data := bytes.NewReader([]byte("Hello There!"))
-	if err := s.WriteStream("Iamhappy", data); err != nil {
+	if err := s.WriteStream(key, data); err != nil {
 		t.Error(err)
 	}
-	r, err := s.Read("Iamhappy")
+	r, err := s.Read(key)
 	if err != nil {
 		t.Error(err)
 	}
@@ -42,5 +41,7 @@ func TestWrite(t *testing.T) {
 	b, _ := io.ReadAll(r)
 
 	fmt.Println(string(b))
+
+	// s.delete(key)
 
 }
