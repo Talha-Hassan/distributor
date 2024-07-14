@@ -23,19 +23,24 @@ type TCPTransportOps struct {
 	ListenAddress string
 	HandshakeFunc Handshake
 	Decoder       Decoder
+	OnPeer        func(Peer) error
 }
 
 type TCPtransport struct {
 	TCPTransportOps
 	listener net.Listener
-	// mu            sync.RWMutex
-	// peers         map[net.Addr]Peer
+	rpcch    chan RPC
 }
 
 func NewTCPTransport(data TCPTransportOps) *TCPtransport {
 	return &TCPtransport{
 		TCPTransportOps: data,
+		rpcch:           make(chan RPC),
 	}
+}
+
+func (t *TCPtransport) Consume() <-chan RPC {
+	return t.rpcch
 }
 
 func (t *TCPtransport) ListerAndAccept() error {
@@ -61,10 +66,26 @@ func (t *TCPtransport) AcceptLoop() {
 	}
 }
 
-// type temp struct{}
+func (p *TCPPeer) Close() error {
+	return p.conn.Close()
+}
+
+// type temp struc t{}
 
 func (t *TCPtransport) HandlerConn(conn net.Conn) {
+	var err error
+
+	defer func() {
+		fmt.Printf("Dropping Connection due to : %s", err)
+	}()
+
 	peer := newTCPPeer(conn, true)
+
+	if t.OnPeer != nil {
+		if err = t.OnPeer(peer); err != nil {
+			return
+		}
+	}
 
 	fmt.Printf("Accpeted %+v\n", conn)
 	if err := t.HandshakeFunc(peer); err != nil {
@@ -72,14 +93,14 @@ func (t *TCPtransport) HandlerConn(conn net.Conn) {
 		fmt.Printf("TCP Handshake Error %s\n", err)
 		return
 	}
-	rpc := &RPC{}
+	rpc := RPC{}
 	for {
-		if err := t.Decoder.Decode(conn, rpc); err != nil {
+		if err := t.Decoder.Decode(conn, &rpc); err != nil {
 			fmt.Printf("TCP Error %s\n", err)
 			continue
 		}
 		rpc.From = conn.RemoteAddr()
-		fmt.Printf("Message: %+v\n", rpc)
+		t.rpcch <- rpc
 	}
 
 }
