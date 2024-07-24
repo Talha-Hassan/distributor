@@ -1,7 +1,9 @@
 package p2p
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"net"
 )
 
@@ -43,6 +45,12 @@ func (t *TCPtransport) Consume() <-chan RPC {
 	return t.rpcch
 }
 
+// remote addr implements the peer interface and return the
+// remote addr of it's underlying connection
+func (p *TCPPeer) RemoteAddr() net.Addr {
+	return p.conn.RemoteAddr()
+}
+
 func (t *TCPtransport) ListerAndAccept() error {
 	var err error
 
@@ -52,34 +60,59 @@ func (t *TCPtransport) ListerAndAccept() error {
 	}
 	go t.AcceptLoop()
 
+	fmt.Printf("Server is Listening on Port => %s\n", t.ListenAddress)
+
 	return nil
 }
 
 func (t *TCPtransport) AcceptLoop() {
 	for {
 		conn, err := t.listener.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			return
+		}
 		if err != nil {
 			fmt.Printf("TCP accept error: %s\n", err)
 		}
-
-		go t.HandlerConn(conn)
+		fmt.Printf("New Incoming Connection %+v\n", conn)
+		go t.HandlerConn(conn, false)
 	}
+}
+
+func (t *TCPtransport) Close() error {
+	return t.listener.Close()
+}
+
+func (p *TCPPeer) send(b []byte) error {
+	_, err := p.conn.Write(b)
+	return err
 }
 
 func (p *TCPPeer) Close() error {
 	return p.conn.Close()
 }
-
-// type temp struc t{}
-
-func (t *TCPtransport) HandlerConn(conn net.Conn) {
+func (t *TCPtransport) Dial(addr string) error {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	go t.HandlerConn(conn, true)
+	return nil
+}
+func (t *TCPtransport) HandlerConn(conn net.Conn, outbound bool) {
 	var err error
 
 	defer func() {
 		fmt.Printf("Dropping Connection due to : %s", err)
+		conn.Close()
 	}()
 
-	peer := newTCPPeer(conn, true)
+	peer := newTCPPeer(conn, outbound)
+
+	if err := t.HandshakeFunc(peer); err != nil {
+		return
+	}
 
 	if t.OnPeer != nil {
 		if err = t.OnPeer(peer); err != nil {
@@ -87,12 +120,6 @@ func (t *TCPtransport) HandlerConn(conn net.Conn) {
 		}
 	}
 
-	fmt.Printf("Accpeted %+v\n", conn)
-	if err := t.HandshakeFunc(peer); err != nil {
-		conn.Close()
-		fmt.Printf("TCP Handshake Error %s\n", err)
-		return
-	}
 	rpc := RPC{}
 	for {
 		if err := t.Decoder.Decode(conn, &rpc); err != nil {
